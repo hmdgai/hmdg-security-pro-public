@@ -62,6 +62,7 @@ function wp_safe_remote_get(string $url, array $args = []): array|WP_Error
 function wp_remote_retrieve_response_code(array $response): int { return $response['response']['code']; }
 function wp_remote_retrieve_body(array $response): string { return $response['body']; }
 function esc_html(string $text): string { return htmlspecialchars($text, ENT_QUOTES, 'UTF-8'); }
+function get_temp_dir(): string { return sys_get_temp_dir() . '/'; }
 function wp_delete_file(string $path): void { if (is_file($path)) { unlink($path); } }
 function download_url(string $url, int $timeout = 300): string|WP_Error
 {
@@ -75,6 +76,7 @@ function download_url(string $url, int $timeout = 300): string|WP_Error
 
 require_once __DIR__ . '/../includes/Services/ObjectCacheService.php';
 require_once __DIR__ . '/../includes/Services/ReleaseMetadata.php';
+require_once __DIR__ . '/../includes/Services/ProtectedRootPaths.php';
 require_once __DIR__ . '/../includes/Services/SignedReleasePackage.php';
 require_once __DIR__ . '/../includes/Services/ReleaseUpdater.php';
 

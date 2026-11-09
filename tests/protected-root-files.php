@@ -142,6 +142,7 @@ namespace HMDG\Security\Admin {
 namespace {
     require_once __DIR__ . '/../includes/Detection/Severity.php';
     require_once __DIR__ . '/../includes/Services/ProtectedRootPaths.php';
+    require_once __DIR__ . '/../includes/Services/SafeFileWriter.php';
     require_once __DIR__ . '/../includes/Admin/QuarantineService.php';
     require_once __DIR__ . '/../includes/Modules/ConflictCleaner.php';
 
@@ -207,6 +208,23 @@ namespace {
         fixtureWrite($fixture . '/wp-config.php');
         assertFlagged($fixture . '/wp-config.php', '../wp-config.php');
 
+        $configPath = ABSPATH . 'wp-config.php';
+        $oldHash = hash_file('sha256', $configPath);
+        $baselinePath = WP_CONTENT_DIR . '/hmdg-security-pro/checksums.json';
+        fixtureWrite($baselinePath, json_encode(['files' => ['wp-config.php' => $oldHash]], JSON_THROW_ON_ERROR));
+        fixtureWrite($configPath, "<?php\ndefine('DB_NAME', 'fixture');\nrequire_once ABSPATH . 'wp-settings.php';\n");
+        $hostRewriteHash = hash_file('sha256', $configPath);
+        check($hostRewriteHash !== $oldHash, 'host rewrite differs from the stored baseline');
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $id = $service->quarantine($configPath, Severity::HighRisk, [], 'file_integrity_scan');
+            check(is_int($id) && $repository->rows[$id]['status'] === FindingsRepository::STATUS_FLAGGED,
+                'repeated HighRisk config detections remain review-only');
+            check(is_file($configPath) && hash_file('sha256', $configPath) === $hostRewriteHash,
+                'rewritten config survives repeated detections without editing or moving');
+        }
+        check(json_decode(file_get_contents($baselinePath), true)['files']['wp-config.php'] === $oldHash,
+            'config protection does not depend on silently trusting or updating its stale baseline');
+
         foreach (['missing-root.txt', './missing-root.php', 'wp-content/../missing-root.php', '../wp-config.php',
             'wp-admin/missing.php', 'wp-includes/nested/missing.css', 'wp-content/../wp-admin/nested/missing.php', ''] as $original) {
             [$id, $archived] = archiveFinding($original);
@@ -226,12 +244,12 @@ namespace {
 
         foreach (['restored-root.php', 'wp-admin/restored-fixture.php', 'wp-includes/restored-fixture.php'] as $relative) {
             [$id, $archived] = archiveFinding($relative, 'restored fixture');
-            check($service->restore($id, 1), 'genuine archived protected file can be restored to missing location');
-            check(file_get_contents(ABSPATH . $relative) === 'restored fixture' && !file_exists($archived), 'protected restoration keeps original bytes');
+            check(!$service->restore($id, 1), 'protected files are never created by restoration');
+            check(!file_exists(ABSPATH . $relative) && is_file($archived), 'protected restoration leaves missing root/core destination untouched');
         }
         fixtureRemove($fixture . '/wp-config.php');
-        [$id] = archiveFinding('../wp-config.php', 'restored parent config');
-        check($service->restore($id, 1) && file_get_contents($fixture . '/wp-config.php') === 'restored parent config', 'parent config can be safely restored');
+        [$id, $archived] = archiveFinding('../wp-config.php', 'restored parent config');
+        check(!$service->restore($id, 1) && !file_exists($fixture . '/wp-config.php') && is_file($archived), 'missing parent config remains untouched');
         [$id, $archived] = archiveFinding('index.php', 'must not overwrite');
         $before = file_get_contents(ABSPATH . 'index.php');
         check(!$service->restore($id, 1) && is_file($archived), 'existing root file is never overwritten');
@@ -241,7 +259,7 @@ namespace {
         $GLOBALS['root_fail_rename'] = realpath($archived);
         $GLOBALS['root_fail_unlink'] = realpath($archived);
         check(!$service->restore($id, 1), 'restore reports source-cleanup failure');
-        check(is_file($archived) && file_get_contents(ABSPATH . 'fallback-root.php') === 'retained fallback copy', 'failed cleanup keeps restored protected copy and quarantine evidence');
+        check(is_file($archived) && !file_exists(ABSPATH . 'fallback-root.php'), 'refusal preserves quarantine evidence without creating a protected file');
         check(!in_array(ABSPATH . 'fallback-root.php', $GLOBALS['root_unlinked'], true), 'protected restore rollback never attempts root unlink');
         $GLOBALS['root_fail_rename'] = $GLOBALS['root_fail_unlink'] = null;
 

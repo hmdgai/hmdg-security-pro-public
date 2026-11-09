@@ -61,7 +61,7 @@ final class LogService
      * Per-request cache: have we verified the directory exists yet?
      *
      * Without this flag, every log call invokes is_dir() (and potentially
-     * wp_mkdir_p() + file_put_contents() for .htaccess). Once is enough.
+     * wp_mkdir_p() + an atomic write for .htaccess). Once is enough.
      */
     private bool $directoryChecked = false;
 
@@ -97,6 +97,11 @@ final class LogService
      */
     public function log(string $severity, string $module, string $message, array $context = []): void
     {
+        // A rejected log target must not attempt to log its own refusal.
+        if (!ProtectedRootPaths::allowsWrite($this->logPath)
+            || !ProtectedRootPaths::allowsWrite($this->logDir)) {
+            return;
+        }
         // Cached per-request: avoid redundant filesystem checks on every call
         if (!$this->directoryChecked) {
             $this->ensureDirectoryExists();
@@ -132,8 +137,7 @@ final class LogService
             $contextJson,
         );
 
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-        file_put_contents(filename: $this->logPath, data: $line, flags: FILE_APPEND | LOCK_EX);
+        SafeFileWriter::append($this->logPath, $line);
     }
 
     /**
@@ -198,7 +202,8 @@ final class LogService
                 : $this->logPath;
             $target = $this->logPath . '.' . $i;
 
-            if (file_exists($source)) {
+            if (ProtectedRootPaths::allowsWrite($source)
+                && ProtectedRootPaths::allowsWrite($target) && file_exists($source)) {
                 // If target already exists (e.g. the oldest), it will be overwritten
                 rename(from: $source, to: $target);
             }
@@ -243,6 +248,9 @@ final class LogService
      */
     private function ensureDirectoryExists(): void
     {
+        if (!ProtectedRootPaths::allowsWrite($this->logDir)) {
+            return;
+        }
         if (is_dir($this->logDir)) {
             return;
         }
@@ -253,13 +261,8 @@ final class LogService
         // Write an .htaccess to prevent direct web access to log files
         $htaccessPath = $this->logDir . '/.htaccess';
 
-        if (!file_exists($htaccessPath)) {
-            // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-            file_put_contents(
-                filename: $htaccessPath,
-                data: "Deny from all\n",
-                flags: LOCK_EX,
-            );
+        if (ProtectedRootPaths::allowsWrite($htaccessPath) && !file_exists($htaccessPath)) {
+            SafeFileWriter::replace($htaccessPath, "Deny from all\n");
         }
     }
 }

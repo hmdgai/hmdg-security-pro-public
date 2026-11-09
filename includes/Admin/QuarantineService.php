@@ -8,6 +8,7 @@ use HMDG\Security\Detection\Severity;
 use HMDG\Security\Detection\Signal;
 use HMDG\Security\Services\LogService;
 use HMDG\Security\Services\ProtectedRootPaths;
+use HMDG\Security\Services\SafeFileWriter;
 
 /**
  * Quarantine filesystem operations for v1.5.0.
@@ -62,7 +63,7 @@ final class QuarantineService
     {
         $root = $this->quarantineRoot();
 
-        if ($root === null) {
+        if ($root === null || !ProtectedRootPaths::allowsWrite($root)) {
             return false;
         }
 
@@ -78,17 +79,16 @@ final class QuarantineService
         }
 
         $htaccess = $root . '/.htaccess';
-        if (!file_exists($htaccess)) {
-            @file_put_contents(
+        if (ProtectedRootPaths::allowsWrite($htaccess) && !file_exists($htaccess)) {
+            SafeFileWriter::replace(
                 $htaccess,
                 "# HMDG Security quarantine — no web access\nOrder deny,allow\nDeny from all\n",
-                LOCK_EX,
             );
         }
 
         $indexStub = $root . '/index.php';
-        if (!file_exists($indexStub)) {
-            @file_put_contents($indexStub, '<?php // Silence is golden.', LOCK_EX);
+        if (ProtectedRootPaths::allowsWrite($indexStub) && !file_exists($indexStub)) {
+            SafeFileWriter::replace($indexStub, '<?php // Silence is golden.');
         }
 
         return true;
@@ -157,7 +157,7 @@ final class QuarantineService
         $shard   = substr($hash, 0, self::SHARD_PREFIX_LENGTH);
         $baseDir = $this->quarantineRoot() . '/' . $date . '/' . $shard;
 
-        if (!wp_mkdir_p($baseDir)) {
+        if (!ProtectedRootPaths::allowsWrite($baseDir) || !wp_mkdir_p($baseDir)) {
             $this->logService->warning(
                 module: self::MODULE,
                 message: 'Failed to create quarantine shard directory',
@@ -176,6 +176,14 @@ final class QuarantineService
             $counter++;
             $targetFile  = $baseDir . '/' . $basename . '.' . $counter;
             $sidecarFile = $baseDir . '/' . $basename . '.' . $counter . '.json';
+        }
+
+        if (!ProtectedRootPaths::allowsWrite($targetFile) || !ProtectedRootPaths::allowsWrite($sidecarFile)) {
+            $this->logService->warning(
+                module: self::MODULE,
+                message: 'Quarantine refused for protected WordPress root/core destination',
+            );
+            return null;
         }
 
         $relativeOriginal = ltrim(substr($normalisedSource, strlen($abspath)), '/');
@@ -236,10 +244,9 @@ final class QuarantineService
             'top_signal_weight'   => $topWeight,
             'signal_categories'   => $categoryList,
         ];
-        @file_put_contents(
+        SafeFileWriter::replace(
             $sidecarFile,
             (string) wp_json_encode($sidecar, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
-            LOCK_EX,
         );
 
         return $this->repository->insert([
@@ -368,7 +375,7 @@ final class QuarantineService
             return false;
         }
         $sidecar = $absolute . '.json';
-        if (file_exists($sidecar) && !@unlink($sidecar)) {
+        if (ProtectedRootPaths::allowsWrite($sidecar) && file_exists($sidecar) && !@unlink($sidecar)) {
             $this->logService->warning(
                 module: self::MODULE,
                 message: 'Delete permanently warning — sidecar unlink failed',
@@ -404,8 +411,17 @@ final class QuarantineService
             return false;
         }
 
+        if (ProtectedRootPaths::isProtectedOriginal($originalPath)) {
+            $this->logService->warning(
+                module: self::MODULE,
+                message: 'Restore refused for protected WordPress root/core original',
+                context: ['finding_id' => $findingId],
+            );
+            return false;
+        }
+
         $targetAbsolute = $this->resolveRestoreTarget(relative: $originalPath);
-        if ($targetAbsolute === null) {
+        if ($targetAbsolute === null || !ProtectedRootPaths::allowsWrite($targetAbsolute)) {
             return false;
         }
 
@@ -426,7 +442,8 @@ final class QuarantineService
         // Make sure the parent of the restore target exists (plugin
         // dir may have been removed while the finding sat in queue).
         $parentDir = dirname($targetAbsolute);
-        if (!is_dir($parentDir) && !wp_mkdir_p($parentDir)) {
+        if (!ProtectedRootPaths::allowsWrite($parentDir)
+            || (!is_dir($parentDir) && !wp_mkdir_p($parentDir))) {
             $this->logService->warning(
                 module: self::MODULE,
                 message: 'Restore failed — parent directory unavailable',
@@ -441,7 +458,7 @@ final class QuarantineService
                 return false;
             }
             if (!@unlink($quarantineAbsolute)) {
-                if (!ProtectedRootPaths::isProtected($targetAbsolute)) {
+                if (ProtectedRootPaths::allowsWrite($targetAbsolute)) {
                     @unlink($targetAbsolute);
                 }
                 $this->logService->warning(
@@ -455,7 +472,7 @@ final class QuarantineService
 
         // Remove sidecar and prune empty shard dir.
         $sidecar = $quarantineAbsolute . '.json';
-        if (file_exists($sidecar) && !@unlink($sidecar)) {
+        if (ProtectedRootPaths::allowsWrite($sidecar) && file_exists($sidecar) && !@unlink($sidecar)) {
             $this->logService->warning(
                 module: self::MODULE,
                 message: 'Restore warning — sidecar unlink failed',
@@ -519,7 +536,7 @@ final class QuarantineService
             return null;
         }
 
-        if (ProtectedRootPaths::isProtected($candidate) || ProtectedRootPaths::isProtected($resolvedCandidate)) {
+        if (!ProtectedRootPaths::allowsWrite($candidate) || !ProtectedRootPaths::allowsWrite($resolvedCandidate)) {
             $this->logService->warning(
                 module: self::MODULE,
                 message: 'Quarantine operation refused for protected WordPress root/core target',
@@ -543,10 +560,8 @@ final class QuarantineService
 
         $root = rtrim($resolvedAbspath, '/\\');
         $candidate = $root . '/' . ltrim($relative, '/\\');
-        // WordPress also supports wp-config.php immediately above ABSPATH.
-        $parentConfig = dirname($root) . '/wp-config.php';
-        if (ProtectedRootPaths::normalise($candidate) === ProtectedRootPaths::normalise($parentConfig)) {
-            return $parentConfig;
+        if (!ProtectedRootPaths::allowsWrite($candidate)) {
+            return null;
         }
         $parentDir = dirname($candidate);
         $resolvedParent = realpath($parentDir);
@@ -616,7 +631,7 @@ final class QuarantineService
             if (!str_starts_with($normalised, $normalisedRoot)) {
                 return;
             }
-            if ($this->isEmptyDirectory(dir: $dir)) {
+            if (ProtectedRootPaths::allowsWrite($dir) && $this->isEmptyDirectory(dir: $dir)) {
                 @rmdir($dir);
             } else {
                 return;

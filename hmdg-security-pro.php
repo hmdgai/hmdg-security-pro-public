@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Plugin Name: HMDG Security Pro
  * Plugin URI:  https://hmdg.co.uk
  * Description: Enterprise WordPress security hardening with full Elementor Pro, Divi Builder, and Hello Theme compatibility. Silent operation - no admin UI. Designed to coexist with HMDG Helpers.
- * Version:     1.11.2
+ * Version:     1.11.3
  * Update URI:  https://github.com/hmdgai/hmdg-security-pro-public
  * Author:      HMDG
  * Author URI:  https://hmdg.co.uk
@@ -27,7 +27,7 @@ declare(strict_types=1);
 
 defined('ABSPATH') || exit;
 
-define('HMDG_SECURITY_VERSION', '1.11.2');
+define('HMDG_SECURITY_VERSION', '1.11.3');
 define('HMDG_SECURITY_PATH', plugin_dir_path(__FILE__));
 define('HMDG_SECURITY_URL', plugin_dir_url(__FILE__));
 
@@ -64,6 +64,7 @@ spl_autoload_register(static function (string $class): void {
             'HMDG\\Security\\Services\\LogService' => $base . 'Services/LogService.php',
             'HMDG\\Security\\Services\\ObjectCacheService' => $base . 'Services/ObjectCacheService.php',
             'HMDG\\Security\\Services\\ProtectedRootPaths' => $base . 'Services/ProtectedRootPaths.php',
+            'HMDG\\Security\\Services\\SafeFileWriter' => $base . 'Services/SafeFileWriter.php',
             'HMDG\\Security\\Services\\ReleaseUpdater' => $base . 'Services/ReleaseUpdater.php',
             'HMDG\\Security\\Services\\ReleaseMetadata' => $base . 'Services/ReleaseMetadata.php',
             'HMDG\\Security\\Services\\SignedReleasePackage' => $base . 'Services/SignedReleasePackage.php',
@@ -116,41 +117,45 @@ spl_autoload_register(static function (string $class): void {
 /**
  * Activation hook - set up filesystem artefacts and schedule cron events.
  *
- * Uses LOCK_EX on every file write to prevent torn writes if the activation
- * hook fires concurrently (rare but possible on heavily-load-balanced setups).
+ * Uses guarded same-directory atomic replacement, without filesystem locks.
  */
 register_activation_hook(__FILE__, static function (): void {
     // Ensure data directory exists. The data dir slug follows the plugin
     // slug: `wp-content/hmdg-security-pro/`. The PHP namespace/branding
     // ("HMDG Security") is separate from the on-disk slug.
     $data_dir = WP_CONTENT_DIR . '/hmdg-security-pro';
-    if (!is_dir($data_dir)) {
+    if (\HMDG\Security\Services\ProtectedRootPaths::allowsWrite($data_dir) && !is_dir($data_dir)) {
         wp_mkdir_p($data_dir);
     }
 
     // Protect data directory from web access
     $htaccess = $data_dir . '/.htaccess';
-    if (!file_exists($htaccess)) {
-        file_put_contents($htaccess, "Order deny,allow\nDeny from all\n", LOCK_EX);
+    if (\HMDG\Security\Services\ProtectedRootPaths::allowsWrite($htaccess) && !file_exists($htaccess)) {
+        \HMDG\Security\Services\SafeFileWriter::replace($htaccess, "Order deny,allow\nDeny from all\n");
     }
 
     $index = $data_dir . '/index.php';
-    if (!file_exists($index)) {
-        file_put_contents($index, '<?php // Silence is golden.', LOCK_EX);
+    if (\HMDG\Security\Services\ProtectedRootPaths::allowsWrite($index) && !file_exists($index)) {
+        \HMDG\Security\Services\SafeFileWriter::replace($index, '<?php // Silence is golden.');
     }
 
     // Block PHP execution in uploads directory
-    $uploads_dir = wp_upload_dir()['basedir'];
+    $uploads_dir = wp_upload_dir(null, false)['basedir'];
     $uploads_htaccess = $uploads_dir . '/.htaccess';
     $php_block = "\n# BEGIN HMDG Security\n<Files *.php>\ndeny from all\n</Files>\n# END HMDG Security\n";
 
-    if (file_exists($uploads_htaccess)) {
-        $existing = file_get_contents($uploads_htaccess);
-        if ($existing !== false && strpos($existing, '# BEGIN HMDG Security') === false) {
-            file_put_contents($uploads_htaccess, $existing . $php_block, LOCK_EX);
+    // A custom or linked uploads directory must never redirect this write into core.
+    if (\HMDG\Security\Services\ProtectedRootPaths::allowsWrite($uploads_htaccess)
+        && (is_dir($uploads_dir) || (\HMDG\Security\Services\ProtectedRootPaths::allowsWrite($uploads_dir)
+            && wp_mkdir_p($uploads_dir)))) {
+        if (file_exists($uploads_htaccess)) {
+            $existing = file_get_contents($uploads_htaccess);
+            if ($existing !== false && strpos($existing, '# BEGIN HMDG Security') === false) {
+                \HMDG\Security\Services\SafeFileWriter::replace($uploads_htaccess, $existing . $php_block);
+            }
+        } else {
+            \HMDG\Security\Services\SafeFileWriter::replace($uploads_htaccess, $php_block);
         }
-    } else {
-        file_put_contents($uploads_htaccess, $php_block, LOCK_EX);
     }
 
     // Enforce comment requirements ONCE on activation, not on every request.
@@ -236,9 +241,9 @@ register_deactivation_hook(__FILE__, static function (): void {
     $cron_service->deactivate();
 
     // Remove .htaccess injection from uploads
-    $uploads_dir = wp_upload_dir()['basedir'];
+    $uploads_dir = wp_upload_dir(null, false)['basedir'];
     $uploads_htaccess = $uploads_dir . '/.htaccess';
-    if (file_exists($uploads_htaccess)) {
+    if (\HMDG\Security\Services\ProtectedRootPaths::allowsWrite($uploads_htaccess) && file_exists($uploads_htaccess)) {
         $content = file_get_contents($uploads_htaccess);
         if ($content !== false) {
             $content = preg_replace(
@@ -246,7 +251,7 @@ register_deactivation_hook(__FILE__, static function (): void {
                 '',
                 $content
             );
-            file_put_contents($uploads_htaccess, $content, LOCK_EX);
+            \HMDG\Security\Services\SafeFileWriter::replace($uploads_htaccess, $content);
         }
     }
 });

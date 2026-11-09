@@ -32,6 +32,9 @@ final class SignedReleasePackage
         if (!function_exists('download_url')) {
             require_once ABSPATH . 'wp-admin/includes/file.php';
         }
+        if (!ProtectedRootPaths::allowsWrite(rtrim(get_temp_dir(), '/\\') . '/hmdg-security-pro-download.tmp')) {
+            return self::error('protected_temporary_directory');
+        }
         $limit = static function (array $args, string $url) use ($package): array {
             if ($url === $package) {
                 $args['limit_response_size'] = self::MAX_BYTES + 1;
@@ -53,6 +56,9 @@ final class SignedReleasePackage
     /** @return string|\WP_Error The verified file, or error after removing only the temporary download. */
     private static function verifyDownloaded(string $file, string $package, string $publicKey, string $version): string|\WP_Error
     {
+        if (!ProtectedRootPaths::allowsWrite($file)) {
+            return self::error('protected_temporary_file');
+        }
         $size = is_file($file) && is_readable($file) ? filesize($file) : false;
         if ($size === false || $size < 1 || $size > self::MAX_BYTES) {
             wp_delete_file($file);

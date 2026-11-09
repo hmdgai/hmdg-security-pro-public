@@ -9,6 +9,8 @@ use HMDG\Security\SecurityEvent;
 use HMDG\Security\Services\AlertService;
 use HMDG\Security\Services\BuilderDetectionService;
 use HMDG\Security\Services\LogService;
+use HMDG\Security\Services\ProtectedRootPaths;
+use HMDG\Security\Services\SafeFileWriter;
 
 /**
  * Security hardening for Elementor and Elementor Pro.
@@ -482,7 +484,7 @@ final class ElementorSecurity
 
         $filePath = $upload['file'] ?? '';
 
-        if ($filePath === '' || !file_exists($filePath)) {
+        if ($filePath === '' || !ProtectedRootPaths::allowsWrite($filePath) || !file_exists($filePath)) {
             return $upload;
         }
 
@@ -496,7 +498,9 @@ final class ElementorSecurity
         $patternsFound = $content !== $sanitised;
 
         if ($patternsFound) {
-            file_put_contents($filePath, $sanitised, LOCK_EX);
+            if (!SafeFileWriter::replace($filePath, $sanitised)) {
+                return $upload;
+            }
 
             $this->logService->warning(self::MODULE, 'SVG file sanitised — dangerous patterns removed.', [
                 'file'     => $filePath,

@@ -22,6 +22,8 @@ use HMDG\Security\Services\BuilderDetectionService;
 use HMDG\Security\Services\CronService;
 use HMDG\Security\Services\LogService;
 use HMDG\Security\Services\ObjectCacheService;
+use HMDG\Security\Services\ProtectedRootPaths;
+use HMDG\Security\Services\SafeFileWriter;
 
 /**
  * Monitors WordPress core files, active plugins, and the active theme
@@ -1776,8 +1778,8 @@ final class FileIntegrity
     /**
      * Write checksum data to the configured JSON file.
      *
-     * Creates the parent directory if it does not exist. Uses LOCK_EX
-     * to prevent corruption from concurrent writes.
+     * Creates the parent directory if needed, then replaces the complete JSON
+     * atomically without waiting for a filesystem lock.
      *
      * @param array<string, mixed> $data Checksum data to serialise.
      */
@@ -1785,6 +1787,14 @@ final class FileIntegrity
     {
         $filePath = $this->config->checksumFilePath;
         $directory = dirname($filePath);
+
+        if (!ProtectedRootPaths::allowsWrite($filePath) || !ProtectedRootPaths::allowsWrite($directory)) {
+            $this->logService->warning(
+                module: self::MODULE,
+                message: 'Checksum write refused for protected WordPress root/core destination',
+            );
+            return;
+        }
 
         if (!is_dir($directory)) {
             wp_mkdir_p(target: $directory);
@@ -1804,12 +1814,7 @@ final class FileIntegrity
             return;
         }
 
-        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
-        $written = file_put_contents(
-            filename: $filePath,
-            data: $json,
-            flags: LOCK_EX,
-        );
+        $written = SafeFileWriter::replace($filePath, $json);
 
         if ($written === false) {
             $this->logService->critical(

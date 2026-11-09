@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.11.3] - 2026-11-09
+
+### Fixed
+
+- Extend protected WordPress root/core/config paths to every plugin file-writing destination, including uploads protection files, SVG sanitisation, integrity baselines, log writes/rotation, quarantine destinations and updater temporary files.
+- Refuse protected root/core/config restoration or creation through the plugin, and reject symlink or hardlink aliases that could write into a protected file.
+- Resolve upload paths without implicitly creating directories before the protection checks. Ordinary plugin-data and upload operations retain their existing behaviour outside protected paths.
+
+- Replace blocking file-lock writes with guarded atomic replacement, preserving the prior file on failure; append bounded log entries without file-lock waits.
+- Add repeated host-rewrite/high-risk regressions so a stale baseline cannot move or rewrite protected WordPress files.
+
+### Operator note
+
+- This patch supersedes the 1.11.2 prerelease for deployment. Recover protected WordPress files through the hosting backup or a separate authorised recovery operation.
+- These guards apply to this plugin's filesystem operations. They do not control other plugins, WordPress core updates, hosting changes or external file access.
+
 ## [1.11.2] - 2026-11-09
 
 ### Fixed

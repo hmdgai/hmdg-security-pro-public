@@ -14,6 +14,46 @@ namespace HMDG\Security\Services;
 final class ProtectedRootPaths
 {
     /**
+     * Refuse writes through root/core aliases, including missing destinations.
+     *
+     * Resolving the nearest existing ancestor also covers paths whose immediate
+     * parent has not yet been created. A dangling final link is never writable.
+     *
+     * @param string $absolutePath File or directory to create, replace or move.
+     * @return bool True only for a destination outside the protected site paths.
+     */
+    public static function allowsWrite(string $absolutePath): bool
+    {
+        clearstatcache(true, $absolutePath);
+        if (self::isProtected($absolutePath) || is_link($absolutePath)) {
+            return false;
+        }
+        if (is_file($absolutePath)) {
+            $stat = lstat($absolutePath);
+            // Writing a hard link also edits its other names, which may be core files.
+            if ($stat === false || $stat['nlink'] > 1) {
+                return false;
+            }
+        }
+        $ancestor = dirname($absolutePath);
+        while (!file_exists($ancestor) && !is_link($ancestor)) {
+            $parent = dirname($ancestor);
+            if ($parent === $ancestor) {
+                return false;
+            }
+            $ancestor = $parent;
+        }
+        $resolved = realpath($ancestor);
+        $path = self::normalise($absolutePath);
+        $logicalAncestor = self::normalise($ancestor);
+        if ($resolved === false || $path === null || $logicalAncestor === null) {
+            return false;
+        }
+        $projected = rtrim($resolved, '/\\') . substr($path, strlen($logicalAncestor));
+        return !self::isProtected($projected);
+    }
+
+    /**
      * Includes missing root files and the supported parent wp-config.php location.
      *
      * @param string $absolutePath Source, destination or stored absolute path.
