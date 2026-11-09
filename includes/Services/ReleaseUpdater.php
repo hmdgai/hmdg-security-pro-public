@@ -12,7 +12,7 @@ namespace HMDG\Security\Services;
  */
 final class ReleaseUpdater
 {
-    public const PUBLIC_REPOSITORY = 'felmerald-hmdg/hmdg-security-automation';
+    public const PUBLIC_REPOSITORY = 'hmdgai/hmdg-security-pro-public';
     public const PUBLIC_KEY = '7+7jnEFQP8jHg6qxXou8eOvwRrpHHs7mjBzKQjC7cIw=';
     public const BASENAME = 'hmdg-security-pro/hmdg-security-pro.php';
     private readonly ReleaseMetadata $metadata;

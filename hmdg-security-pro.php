@@ -7,7 +7,7 @@ declare(strict_types=1);
  * Plugin URI:  https://hmdg.co.uk
  * Description: Enterprise WordPress security hardening with full Elementor Pro, Divi Builder, and Hello Theme compatibility. Silent operation - no admin UI. Designed to coexist with HMDG Helpers.
  * Version:     1.11.0
- * Update URI:  https://github.com/felmerald-hmdg/hmdg-security-automation
+ * Update URI:  https://github.com/hmdgai/hmdg-security-pro-public
  * Author:      HMDG
  * Author URI:  https://hmdg.co.uk
  * Requires PHP: 8.2
