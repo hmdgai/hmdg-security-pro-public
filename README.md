@@ -2,7 +2,7 @@
 
 WordPress security hardening maintained by [HMDG](https://hmdg.co.uk) for its managed sites.
 
-- Version: `1.11.1` - see [CHANGELOG.md](CHANGELOG.md)
+- Version: `1.11.2` - see [CHANGELOG.md](CHANGELOG.md)
 - WordPress: 6.4 or later
 - PHP: 8.2 or later, with sodium and ZIP support for signed updates
 - Plugin directory and entry point: `hmdg-security-pro/hmdg-security-pro.php`
@@ -17,7 +17,7 @@ A version bump pushed to `main` runs PHP 8.2 syntax and behavioural checks, veri
 The workflow publishes a **prerelease** with its detached `.zip.sig` signature. Prereleases are excluded from `/releases/latest`, so publication alone does not update client sites. After a signed canary passes, an authorised operator promotes the release:
 
 ```sh
-gh release edit v1.11.1 --repo hmdgai/hmdg-security-pro-public --latest --prerelease=false
+gh release edit v1.11.2 --repo hmdgai/hmdg-security-pro-public --latest --prerelease=false
 ```
 
 Existing sites need a one-time signed bootstrap to install the updater. Later promoted versions use native WordPress background updates. Checks run in admin, cron and CLI contexts, with object-cache backoff; ordinary visitor requests do no updater work. No GitHub token is stored on sites. Cron availability, hosting policy, filesystem access and GitHub rate limits can delay or prevent updates.

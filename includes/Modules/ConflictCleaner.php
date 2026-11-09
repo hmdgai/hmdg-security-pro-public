@@ -6,6 +6,7 @@ namespace HMDG\Security\Modules;
 
 use HMDG\Security\SecurityConfig;
 use HMDG\Security\Services\LogService;
+use HMDG\Security\Services\ProtectedRootPaths;
 
 /**
  * One-shot activation-time cleanup of conflicting security plugins.
@@ -212,15 +213,15 @@ final class ConflictCleaner
     private function runInner(): void
     {
         // WP's plugin functions are not loaded on every request — we
-        // need them for get_plugins / deactivate_plugins / delete_plugins.
+        // need them for discovery, silent deactivation and cache invalidation.
         if (!function_exists('get_plugins')) {
             require_once ABSPATH . 'wp-admin/includes/plugin.php';
         }
-        if (!function_exists('delete_plugins')) {
+        if (!function_exists('wp_clean_plugins_cache')) {
             require_once ABSPATH . 'wp-admin/includes/plugin.php';
         }
-        // delete_plugins() uses WP_Filesystem — pre-load it.
-        if (!function_exists('request_filesystem_credentials')) {
+        // Use the WordPress filesystem API, without executing vendor uninstall code.
+        if (!function_exists('WP_Filesystem')) {
             require_once ABSPATH . 'wp-admin/includes/file.php';
         }
 
@@ -478,9 +479,36 @@ final class ConflictCleaner
         }
 
         // ── All safety layers passed — proceed with removal ────────────
+        // WordPress recursively deletes plugin trees; never let a link carry that into site files.
+        if (!$this->isSafeRemovalTree($pluginPath)) {
+            $this->logger->warning(
+                module: self::MODULE,
+                message: 'Conflicting plugin retained — unsafe or linked removal tree',
+                context: ['slug' => $plugin['slug']],
+            );
+            return [
+                'status' => 'skipped',
+                'plugin' => $plugin,
+                'reason' => 'Protected: plugin tree contains a symlink, root alias or unresolved/escaping path',
+            ];
+        }
+
         $version = isset($installed[$plugin['file']]['Version'])
             ? (string) $installed[$plugin['file']]['Version']
             : 'unknown';
+
+        /** @var \WP_Filesystem_Base|null $wp_filesystem */
+        global $wp_filesystem;
+        if (!$wp_filesystem) {
+            \WP_Filesystem([], WP_CONTENT_DIR, true);
+        }
+        if (!($wp_filesystem instanceof \WP_Filesystem_Direct)) {
+            return [
+                'status' => 'skipped',
+                'plugin' => $plugin,
+                'reason' => 'Protected: a local direct filesystem is required for verified removal',
+            ];
+        }
 
         if (is_plugin_active($plugin['file'])) {
             deactivate_plugins($plugin['file'], true);
@@ -491,26 +519,14 @@ final class ConflictCleaner
             );
         }
 
-        // Initialise WP_Filesystem in 'direct' mode. On WP Engine and
-        // most modern hosts the direct method is available. If it isn't,
-        // delete_plugins() returns a WP_Error which we propagate.
-        /** @var \WP_Filesystem_Base|null $wp_filesystem */
-        global $wp_filesystem;
-        if (!$wp_filesystem) {
-            // An empty credentials array + 'direct' type asks WP_Filesystem
-            // to use direct file I/O without prompting for FTP credentials.
-            // Safe for this context because the plugin only runs on
-            // activation, which requires admin filesystem access anyway.
-            \WP_Filesystem([], WP_CONTENT_DIR, true);
-        }
-
-        $deleted = delete_plugins([$plugin['file']]);
-
-        if (is_wp_error($deleted)) {
-            $message = $deleted->get_error_message();
-            $this->logger->error(
+        // delete_plugins() executes third-party uninstall scripts/hooks. Remove only the
+        // verified directory instead; vendor settings remain available for manual cleanup.
+        $deleted = $this->isSafeRemovalTree($pluginPath) && $wp_filesystem->delete($pluginPath, true);
+        if (!$deleted) {
+            $message = 'Verified plugin directory removal failed; manual removal may be required';
+            $this->logger->warning(
                 module: self::MODULE,
-                message: 'delete_plugins returned WP_Error',
+                message: $message,
                 context: ['name' => $plugin['name'], 'error' => $message],
             );
             return [
@@ -519,15 +535,16 @@ final class ConflictCleaner
                 'reason' => $message,
             ];
         }
+        wp_clean_plugins_cache();
 
-        // Verify the folder is actually gone. delete_plugins can return
+        // Verify the folder is actually gone. Filesystem deletion can return
         // true while leaving residue on some filesystems or permission
         // configurations — better to check and report.
         clearstatcache(true, $pluginPath);
         if (is_dir($pluginPath)) {
             $this->logger->warning(
                 module: self::MODULE,
-                message: 'delete_plugins reported success but folder still exists',
+                message: 'Filesystem deletion reported success but plugin folder still exists',
                 context: ['slug' => $plugin['slug']],
             );
             return [
@@ -548,6 +565,42 @@ final class ConflictCleaner
             'plugin'  => $plugin,
             'version' => $version,
         ];
+    }
+
+    /**
+     * @security Check every entry before deactivation/uninstall can invoke recursive filesystem deletion.
+     * @param string $pluginPath Allowlisted plugin directory.
+     * @return bool False on links, canonical escapes, protected aliases or unreadable trees.
+     */
+    private function isSafeRemovalTree(string $pluginPath): bool
+    {
+        $pluginsRoot = realpath(WP_PLUGIN_DIR);
+        $resolved = realpath($pluginPath);
+        if ($pluginsRoot === false || $resolved === false || is_link($pluginPath)
+            || ProtectedRootPaths::containsProtectedPaths($pluginPath)) {
+            return false;
+        }
+        $root = ProtectedRootPaths::normalise($resolved);
+        $expected = ProtectedRootPaths::normalise($pluginsRoot . '/' . basename($pluginPath));
+        if ($root === null || $root !== $expected) {
+            return false;
+        }
+        try {
+            $entries = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($pluginPath, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::SELF_FIRST,
+            );
+            foreach ($entries as $entry) {
+                $real = $entry->getRealPath();
+                $normalised = $real !== false ? ProtectedRootPaths::normalise($real) : null;
+                if ($entry->isLink() || $normalised === null || !str_starts_with($normalised, $root . '/')) {
+                    return false;
+                }
+            }
+        } catch (\UnexpectedValueException) {
+            return false;
+        }
+        return true;
     }
 
     /**

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.11.2] - 2026-11-09
+
+### Fixed
+
+- Delete orphaned postmeta with a MySQL-compatible single-table `DELETE` and correlated `NOT EXISTS` query, retaining the configured 500-row batch, custom table prefixes and existing Elementor/Divi exclusions.
+- Protect WordPress root files, `wp-admin`, `wp-includes`/`WPINC`, and both supported `wp-config.php` locations from quarantine or permanent removal. Logical paths, resolved aliases and legacy quarantine records receive the same protection. Findings remain visible for manual review.
+- Preserve a restored protected file if cleaning its quarantine copy fails; never roll back restoration by deleting the protected file.
+- Reject symlinked or escaping conflicting-plugin trees before removal. Use guarded direct WordPress filesystem removal without running third-party uninstall scripts or hooks.
+
+### Operator note
+
+- Conflicting-plugin database settings and translations may remain because third-party uninstall code is intentionally bypassed. This patch constrains this plugin's destructive operations; it does not establish the cause of an earlier site incident or control unrelated software.
+- Added cleanup and real-filesystem regressions. The orphan query was additionally tested against disposable MySQL 8.0.35 and 8.4.0 databases, with 55 checks passing on each.
+
 ## [1.11.1] - 2026-11-09
 
 ### Fixed

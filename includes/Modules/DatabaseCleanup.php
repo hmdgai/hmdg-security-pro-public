@@ -345,16 +345,24 @@ final class DatabaseCleanup
      */
     private function cleanOrphanedPostmeta(\wpdb $wpdb): int
     {
+        $postmetaTable = $wpdb->prefix . 'postmeta';
+        $postsTable = $wpdb->prefix . 'posts';
+
+        // MySQL permits LIMIT only for single-table DELETE statements.
         /** @var int|false $deleted */
         $deleted = $wpdb->query(
             $wpdb->prepare(
-                "DELETE pm FROM {$wpdb->postmeta} pm
-                LEFT JOIN {$wpdb->posts} p ON pm.post_id = p.ID
-                WHERE p.ID IS NULL
-                AND pm.meta_key NOT LIKE '_elementor_%%'
-                AND pm.meta_key NOT LIKE 'et_pb_%%'
-                AND pm.meta_key NOT LIKE '_et_pb_%%'
+                "DELETE FROM %i
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM %i AS p WHERE p.ID = %i.post_id
+                )
+                AND meta_key NOT LIKE '_elementor_%%'
+                AND meta_key NOT LIKE 'et_pb_%%'
+                AND meta_key NOT LIKE '_et_pb_%%'
                 LIMIT %d",
+                $postmetaTable,
+                $postsTable,
+                $postmetaTable,
                 $this->config->cleanupBatchLimit,
             )
         );

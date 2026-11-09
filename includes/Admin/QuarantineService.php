@@ -7,12 +7,13 @@ namespace HMDG\Security\Admin;
 use HMDG\Security\Detection\Severity;
 use HMDG\Security\Detection\Signal;
 use HMDG\Security\Services\LogService;
+use HMDG\Security\Services\ProtectedRootPaths;
 
 /**
  * Quarantine filesystem operations for v1.5.0.
  *
  * On HighRisk detection, AlertDispatcher calls quarantine() which:
- *   1. Validates the source path is inside ABSPATH (no symlink escape).
+ *   1. Keeps root/core files in place for review; validates other sources stay inside ABSPATH.
  *   2. Computes SHA-256 of file contents BEFORE moving.
  *   3. Builds a date-sharded quarantine target path.
  *   4. rename()s the file. On cross-filesystem failure, falls back to
@@ -105,6 +106,15 @@ final class QuarantineService
         array $signals,
         string $source,
     ): ?int {
+        if (ProtectedRootPaths::isProtected($absolutePath)) {
+            $this->logService->warning(
+                module: self::MODULE,
+                message: 'Protected WordPress root/core file retained in place for manual review',
+                context: ['path' => $absolutePath],
+            );
+            return $this->flag($absolutePath, $severity, $signals, $source);
+        }
+
         if (!$this->ensureDirectory()) {
             return null;
         }
@@ -120,7 +130,7 @@ final class QuarantineService
             return null;
         }
 
-        $abspath = $this->normalisePath(ABSPATH);
+        $abspath = $this->normalisePath(realpath(ABSPATH) ?: ABSPATH);
         $normalisedSource = $this->normalisePath($resolved);
 
         if (!str_starts_with($normalisedSource, $abspath)) {
@@ -272,10 +282,8 @@ final class QuarantineService
             return null;
         }
 
-        $abspath = $this->normalisePath(ABSPATH);
-        $normalisedSource = $this->normalisePath($resolved);
-
-        if (!str_starts_with($normalisedSource, $abspath)) {
+        $relativeOriginal = ProtectedRootPaths::originalPath($absolutePath);
+        if ($relativeOriginal === null) {
             $this->logService->warning(
                 module: self::MODULE,
                 message: 'Flag refused — source outside ABSPATH',
@@ -288,8 +296,6 @@ final class QuarantineService
         if ($hash === false) {
             return null;
         }
-
-        $relativeOriginal = ltrim(substr($normalisedSource, strlen($abspath)), '/');
 
         $existing = $this->repository->findByPathAndStatus(
             originalPath: $relativeOriginal,
@@ -326,6 +332,15 @@ final class QuarantineService
     {
         $row = $this->repository->findById(id: $findingId);
         if ($row === null) {
+            return false;
+        }
+
+        if (ProtectedRootPaths::isProtectedOriginal((string) ($row['original_path'] ?? ''))) {
+            $this->logService->warning(
+                module: self::MODULE,
+                message: 'Permanent deletion refused for protected WordPress root/core finding',
+                context: ['finding_id' => $findingId],
+            );
             return false;
         }
 
@@ -394,7 +409,7 @@ final class QuarantineService
             return false;
         }
 
-        if (file_exists($targetAbsolute)) {
+        if (file_exists($targetAbsolute) || is_link($targetAbsolute)) {
             $this->logService->warning(
                 module: self::MODULE,
                 message: 'Restore refused — a file already exists at the original path',
@@ -426,7 +441,9 @@ final class QuarantineService
                 return false;
             }
             if (!@unlink($quarantineAbsolute)) {
-                @unlink($targetAbsolute);
+                if (!ProtectedRootPaths::isProtected($targetAbsolute)) {
+                    @unlink($targetAbsolute);
+                }
                 $this->logService->warning(
                     module: self::MODULE,
                     message: 'Restore failed — copied file but could not remove quarantine copy',
@@ -502,6 +519,15 @@ final class QuarantineService
             return null;
         }
 
+        if (ProtectedRootPaths::isProtected($candidate) || ProtectedRootPaths::isProtected($resolvedCandidate)) {
+            $this->logService->warning(
+                module: self::MODULE,
+                message: 'Quarantine operation refused for protected WordPress root/core target',
+                context: ['candidate' => $candidate],
+            );
+            return null;
+        }
+
         return $resolvedCandidate;
     }
 
@@ -517,6 +543,11 @@ final class QuarantineService
 
         $root = rtrim($resolvedAbspath, '/\\');
         $candidate = $root . '/' . ltrim($relative, '/\\');
+        // WordPress also supports wp-config.php immediately above ABSPATH.
+        $parentConfig = dirname($root) . '/wp-config.php';
+        if (ProtectedRootPaths::normalise($candidate) === ProtectedRootPaths::normalise($parentConfig)) {
+            return $parentConfig;
+        }
         $parentDir = dirname($candidate);
         $resolvedParent = realpath($parentDir);
 
