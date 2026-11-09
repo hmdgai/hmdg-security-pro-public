@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.11.1] - 2026-11-09
+
+### Fixed
+
+- Register the file-integrity update monitor in cron and CLI before their early returns.
+- Recognise WordPress single-plugin completion metadata as well as bulk upgrades, preserving the scoped baseline and expected-update marker after legitimate background updates.
+
+### Operator note
+
+- This patch supersedes the initial 1.11.0 prerelease. Keep 1.11.0 unpromoted; use 1.11.1 for the migration canary and one-time bootstrap.
+
 ## [1.11.0] - 2026-11-09
 
 ### Added

@@ -149,18 +149,24 @@ final class UpdateMonitor
     private function handlePluginUpdate(array $hookExtra): void
     {
         $plugins = $hookExtra['plugins'] ?? [];
-
-        if (!is_array($plugins) || $plugins === []) {
+        if (!is_array($plugins)) {
             return;
+        }
+        // Plugin_Upgrader::upgrade() (including background auto-updates)
+        // supplies singular `plugin`; bulk_upgrade() supplies `plugins`.
+        if (isset($hookExtra['plugin'])) {
+            $plugins[] = $hookExtra['plugin'];
         }
 
         $pluginsDir = rtrim(str_replace('\\', '/', WP_PLUGIN_DIR), '/') . '/';
         $abspath    = rtrim(str_replace('\\', '/', ABSPATH), '/') . '/';
 
+        $seen = [];
         foreach ($plugins as $pluginBasename) {
-            if (!is_string($pluginBasename) || $pluginBasename === '') {
+            if (!self::validPluginBasename($pluginBasename) || isset($seen[$pluginBasename])) {
                 continue;
             }
+            $seen[$pluginBasename] = true;
 
             // `$pluginBasename` is of the form `acme-plugin/acme-plugin.php`
             // for a multi-file plugin, or `acme-plugin.php` for a single-file
@@ -196,6 +202,21 @@ final class UpdateMonitor
                 context: ['type' => 'plugin', 'path' => $relative],
             );
         }
+    }
+
+    /** @return bool A plugin identity must not escape the plugin directory during partial rebaseline. */
+    private static function validPluginBasename(mixed $basename): bool
+    {
+        if (!is_string($basename) || strlen($basename) > 512
+            || preg_match('#^(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.php$#D', $basename) !== 1) {
+            return false;
+        }
+        foreach (explode('/', $basename) as $segment) {
+            if ($segment === '.' || $segment === '..') {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

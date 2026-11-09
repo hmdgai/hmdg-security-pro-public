@@ -208,6 +208,9 @@ final class Plugin
         // block entirely.
         if ($this->shouldBindCronCallbacks()) {
             $this->bindCronCallbacks();
+            // Automatic/CLI upgrades also need the post-update partial
+            // baseline refresh. Register before both context early returns.
+            $this->bootUpdateMonitor();
         }
 
         // CLI bypass — registration above is enough for `wp cron event run`,
@@ -251,17 +254,6 @@ final class Plugin
             // includes/Modules/ConflictCleaner.php for the safety posture.
             add_action('admin_notices', [ConflictCleaner::class, 'show_admin_notice']);
 
-        }
-
-        // UpdateMonitor — hooks upgrader_process_complete to
-        // auto-rebaseline SHA-256 checksums after any plugin, theme,
-        // or core update, and stamps a 7-day "recently updated"
-        // marker so scanners do not alert on legitimate post-update
-        // churn. Register in admin, cron, and CLI so automatic and
-        // background update flows are covered too, while anonymous
-        // front-end requests still pay zero cost.
-        if ($isAdmin || wp_doing_cron() || $this->isCli()) {
-            $this->bootUpdateMonitor();
         }
 
         // v1.5.0 operations UI — admin only, never on anonymous
