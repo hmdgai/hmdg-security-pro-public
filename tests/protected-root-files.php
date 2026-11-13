@@ -94,12 +94,18 @@ namespace HMDG\Security {
 }
 
 namespace HMDG\Security\Services {
+    final class AlertService
+    {
+        public function send(mixed ...$arguments): void {}
+    }
     final class LogService
     {
         public array $entries = [];
         public function warning(string $module, string $message, array $context = []): void
         { $this->entries[] = [$module, $message, $context]; }
         public function info(string $module, string $message, array $context = []): void {}
+        public function log(string $severity, string $module, string $message, array $context = []): void
+        { $this->entries[] = [$severity, $module, $message, $context]; }
     }
 }
 
@@ -141,6 +147,10 @@ namespace HMDG\Security\Admin {
 
 namespace {
     require_once __DIR__ . '/../includes/Detection/Severity.php';
+    require_once __DIR__ . '/../includes/SecurityEvent.php';
+    require_once __DIR__ . '/../includes/Detection/Signal.php';
+    require_once __DIR__ . '/../includes/Detection/SignalCategory.php';
+    require_once __DIR__ . '/../includes/Detection/AlertDispatcher.php';
     require_once __DIR__ . '/../includes/Services/ProtectedRootPaths.php';
     require_once __DIR__ . '/../includes/Services/SafeFileWriter.php';
     require_once __DIR__ . '/../includes/Admin/QuarantineService.php';
@@ -198,6 +208,31 @@ namespace {
     }
 
     try {
+        // Real dispatcher + real flagging service, with inert database/mail
+        // boundaries. Only benign PHP bytes exist in these owned fixtures.
+        $dispatcher = new HMDG\Security\Detection\AlertDispatcher(
+            new HMDG\Security\Services\AlertService(), new HMDG\Security\Services\LogService(),
+        );
+        $dispatcher->setQuarantineService($service);
+        $signals = [new HMDG\Security\Detection\Signal(
+            HMDG\Security\Detection\SignalCategory::Baseline, 25, 'Benign fixture baseline difference',
+        )];
+        foreach (['plugins/fixture/required.php', 'themes/fixture/functions.php', 'plugins/hmdg-cookie-consent/fixture.php'] as $relative) {
+            $path = WP_CONTENT_DIR . '/' . $relative;
+            fixtureWrite($path, '<?php // benign required file');
+            $beforeHash = hash_file('sha256', $path);
+            $beforeUnlinks = $GLOBALS['root_unlinked'];
+            $dispatcher->handle(Severity::HighRisk, $path, $signals, 'fixture');
+            $row = $repository->findByPathAndStatus('wp-content/' . $relative, FindingsRepository::STATUS_FLAGGED);
+            check($row !== null && $row['severity'] === Severity::HighRisk->value,
+                'HighRisk plugin/theme findings remain visible with the original severity');
+            check(is_file($path) && hash_file('sha256', $path) === $beforeHash,
+                'HighRisk heuristic does not move or change required plugin/theme bytes');
+            check($row['quarantine_path'] === null && $GLOBALS['root_unlinked'] === $beforeUnlinks,
+                'HighRisk heuristic records no quarantine path or unlink');
+            check(!is_dir($quarantine), 'heuristic dispatch does not create a quarantine directory');
+        }
+
         fixtureWrite(WP_PLUGIN_DIR . '/ordinary/plugin.php');
         foreach (['wp-config.php', 'index.php', 'wp-load.php', 'xmlrpc.php', '.htaccess', 'readme.html', 'custom-root.txt',
             'wp-admin/includes/core-fixture.php', 'wp-admin/core-asset.css', 'wp-includes/core-fixture.php', 'wp-includes/assets/core.js'] as $relative) {

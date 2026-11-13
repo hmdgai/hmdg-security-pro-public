@@ -146,8 +146,8 @@ namespace {
     ];
     $source = 'file_integrity_scan';
 
-    // Changing the similarly named Severity gate would accidentally skip
-    // HighRisk auto-quarantine. Exercise the real dispatcher at every tier.
+    // Exercise the real dispatcher at every tier: heuristic findings must
+    // remain logged and flagged without automatic file movement.
     foreach (Severity::cases() as $severity) {
         $path = WP_CONTENT_DIR . '/plugins/fixture/' . $severity->name . '.php';
         $beforeLogs = count($log->entries);
@@ -160,8 +160,7 @@ namespace {
             $severity->name . ' retains severity and finding details');
 
         $expectedAction = match ($severity) {
-            Severity::HighRisk => 'quarantine',
-            Severity::Suspicious, Severity::NeedsReview => 'flag',
+            Severity::HighRisk, Severity::Suspicious, Severity::NeedsReview => 'flag',
             default => null,
         };
         emailPolicyCheck(count($quarantine->actions) === $beforeActions + (int) ($expectedAction !== null),

@@ -22,7 +22,7 @@ use HMDG\Security\Services\LogService;
  *     consistent across the plugin.
  *   - Supply the `unique_key` used by AlertService for per-file
  *     dedup (`scan:<path>`).
- *   - Preserve HighRisk auto-quarantine independently of email eligibility.
+ *   - Record NeedsReview, Suspicious and HighRisk findings without moving files.
  *
  * @since 1.4.0
  */
@@ -32,8 +32,8 @@ final class AlertDispatcher
     private const MODULE = 'AlertDispatcher';
 
     /**
-     * Optional QuarantineService for v1.5.0 auto-quarantine on
-     * HighRisk findings. Nullable so the detection engine keeps
+     * Optional QuarantineService for recording flagged findings.
+     * Nullable so the detection engine keeps
      * working without the admin stack — e.g. during activation or
      * CLI contexts where Plugin::bootAdminOperations() has not run.
      */
@@ -98,15 +98,11 @@ final class AlertDispatcher
             context: $logContext,
         );
 
-        // v1.7.0 — Suspicious / NeedsReview findings do NOT move the
-        // file (auto-quarantining borderline detections can break
-        // legitimate sites), but we record a flagged row in the admin
-        // Quarantine table so operators have a visible review queue
-        // regardless of whether the severity emails. Idempotent: the
-        // repository's findByPathAndStatus short-circuits duplicates
-        // on repeat detections of the same file.
+        // Heuristics are not proof of malware. Keep every reviewable tier
+        // visible without moving a potentially essential plugin/theme file.
+        // Existing flagged rows retain their repository deduplication rules.
         if (
-            ($severity === Severity::Suspicious || $severity === Severity::NeedsReview)
+            ($severity === Severity::HighRisk || $severity === Severity::Suspicious || $severity === Severity::NeedsReview)
             && $this->quarantineService !== null
         ) {
             $this->quarantineService->flag(
@@ -117,8 +113,8 @@ final class AlertDispatcher
             );
         }
 
-        // Lower tiers stop here. Keep HighRisk flowing through to the
-        // quarantine action even when AlertService declines email.
+        // Lower tiers need no alert-context preparation. Event policy in
+        // AlertService independently determines email eligibility.
         if (!$severity->emitsEmail()) {
             return;
         }
@@ -179,21 +175,6 @@ final class AlertDispatcher
             context: $context,
             severity: $severity,
         );
-
-        // v1.5.0 — auto-quarantine HighRisk findings. Only HighRisk,
-        // never Suspicious. If the QuarantineService is not wired in
-        // (admin boot has not run) we just skip; the finding remains
-        // logged. The file stays in place and can be actioned on the
-        // next admin visit once the system
-        // re-detects it.
-        if ($severity === Severity::HighRisk && $this->quarantineService !== null) {
-            $this->quarantineService->quarantine(
-                absolutePath: $absolutePath,
-                severity: $severity,
-                signals: $signals,
-                source: $source,
-            );
-        }
     }
 
     /**

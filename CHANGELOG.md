@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.11.5] - 2026-11-13
+
+### Fixed
+
+- Add dedicated User Enumeration Protection for actual REST user requests, including mixed-case paths, items, search and embedded dispatch. Preserve existing errors, authorised editorial and own-profile access, and core permission checks.
+- Remove unauthenticated builder-parameter exceptions and the incorrectly typed authentication filter, preserving unrelated REST APIs such as HMDG Cookie Consent.
+- Handle public author probes before WordPress canonical redirects can expose an author slug, with scoped no-cache responses.
+- Check user-route access after ordinary precomputed/cache response filters as well as before dispatch.
+- Keep schedule repair and environment diagnostics off ordinary visitor requests; preserve operational scheduling contexts.
+
+### Changed
+
+- Flag heuristic HighRisk findings for review instead of automatically quarantining files. Existing root/core/config protections and quarantine restore/delete operations remain in place.
+- Correct the dashboard's response-policy wording. Existing flagged-row deduplication remains unchanged, so an older row can retain prior evidence while current logs record new findings.
+
+### Scope
+
+- The protection covers the specified account-enumeration routes and author archives, not every author identifier intentionally published in content.
+- No verified-malware classifier is added; detection emails remain disabled under the 1.11.4 policy.
+- Activation still applies the configured conflicting-security-plugin cleanup. Review that policy before combining protection products on a staging site.
+
 ## [1.11.4] - 2026-11-13
 
 ### Changed

@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Plugin Name: HMDG Security Pro
  * Plugin URI:  https://hmdg.co.uk
  * Description: Enterprise WordPress security hardening with full Elementor Pro, Divi Builder, and Hello Theme compatibility. Silent operation - no admin UI. Designed to coexist with HMDG Helpers.
- * Version:     1.11.4
+ * Version:     1.11.5
  * Update URI:  https://github.com/hmdgai/hmdg-security-pro-public
  * Author:      HMDG
  * Author URI:  https://hmdg.co.uk
@@ -27,7 +27,7 @@ declare(strict_types=1);
 
 defined('ABSPATH') || exit;
 
-define('HMDG_SECURITY_VERSION', '1.11.4');
+define('HMDG_SECURITY_VERSION', '1.11.5');
 define('HMDG_SECURITY_PATH', plugin_dir_path(__FILE__));
 define('HMDG_SECURITY_URL', plugin_dir_url(__FILE__));
 
@@ -80,6 +80,7 @@ spl_autoload_register(static function (string $class): void {
             // SpamProtection removed in 1.3.0 - see CHANGELOG.
             'HMDG\\Security\\Modules\\UpdateMonitor' => $base . 'Modules/UpdateMonitor.php',
             'HMDG\\Security\\Modules\\UserMonitor' => $base . 'Modules/UserMonitor.php',
+            'HMDG\\Security\\Modules\\UserEnumerationProtection' => $base . 'Modules/UserEnumerationProtection.php',
             // v1.4.0 detection engine.
             'HMDG\\Security\\Detection\\Severity' => $base . 'Detection/Severity.php',
             'HMDG\\Security\\Detection\\SignalCategory' => $base . 'Detection/SignalCategory.php',
