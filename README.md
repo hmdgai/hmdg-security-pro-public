@@ -2,13 +2,21 @@
 
 WordPress security hardening maintained by [HMDG](https://hmdg.co.uk) for its managed sites.
 
-- Version: `1.11.4` - see [CHANGELOG.md](CHANGELOG.md)
+- Version: `1.11.5` - see [CHANGELOG.md](CHANGELOG.md)
 - WordPress: 6.4 or later
 - PHP: 8.2 or later, with sodium and ZIP support for signed updates
 - Plugin directory and entry point: `hmdg-security-pro/hmdg-security-pro.php`
 - Licence: Proprietary; publication does not grant additional usage rights
 
 This is the public runtime source and signed-release repository. Fleet inventories, hosting credentials and internal operational records stay in HMDG's private operations repository. No hosting or private-source access key is needed by this repository or installed sites.
+
+## User enumeration and compatibility
+
+User Enumeration Protection blocks unauthorised access to core REST user collections and profiles, including search, case variants and embedded requests. Authenticated users with editorial or user-listing capabilities retain access subject to WordPress's own permissions; other signed-in users retain their own profile. Public author probes and archives redirect to the homepage before canonical author-slug redirects. Other REST namespaces, including HMDG Cookie Consent, retain their existing permission checks.
+
+Heuristic findings are flagged for review instead of automatically moving files. Existing quarantine restore/delete controls and protected WordPress file guards remain. Previously flagged rows can retain older evidence because their existing deduplication behaviour is unchanged; logs record the latest finding.
+
+Schedule repair and environment logging run in activation/admin/cron/CLI contexts, not ordinary visitor requests. Scans still consume hosting resources in their existing background batches. No additional service or dependency is introduced. This does not hide author information intentionally published in content, replace host cache configuration, or guarantee compatibility with every third-party plugin.
 
 ## Detection email policy
 
@@ -23,7 +31,7 @@ A version bump pushed to `main` runs PHP 8.2 syntax and behavioural checks, veri
 The workflow publishes a **prerelease** with its detached `.zip.sig` signature. Prereleases are excluded from `/releases/latest`, so publication alone does not update client sites. After a signed canary passes, an authorised operator promotes the release:
 
 ```sh
-gh release edit v1.11.4 --repo hmdgai/hmdg-security-pro-public --latest --prerelease=false
+gh release edit v1.11.5 --repo hmdgai/hmdg-security-pro-public --latest --prerelease=false
 ```
 
 Existing sites need a one-time signed bootstrap to install the updater. Later promoted versions use native WordPress background updates. Checks run in admin, cron and CLI contexts, with object-cache backoff; ordinary visitor requests do no updater work. No GitHub token is stored on sites. Cron availability, hosting policy, filesystem access and GitHub rate limits can delay or prevent updates.

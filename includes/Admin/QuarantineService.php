@@ -13,7 +13,9 @@ use HMDG\Security\Services\SafeFileWriter;
 /**
  * Quarantine filesystem operations for v1.5.0.
  *
- * On HighRisk detection, AlertDispatcher calls quarantine() which:
+ * AlertDispatcher records heuristic findings via flag(), without moving files.
+ * The retained quarantine() primitive and legacy-record operations remain guarded:
+ * quarantine() performs the following steps if explicitly called:
  *   1. Keeps root/core files in place for review; validates other sources stay inside ABSPATH.
  *   2. Computes SHA-256 of file contents BEFORE moving.
  *   3. Builds a date-sharded quarantine target path.
@@ -264,12 +266,9 @@ final class QuarantineService
     }
 
     /**
-     * v1.7.0 — record a Suspicious / NeedsReview finding in the admin
-     * Quarantine table WITHOUT moving the file. HighRisk findings still
-     * flow through quarantine() above; this path exists because
-     * auto-quarantining borderline detections can break legitimate
-     * sites (a false positive removes a real file). Flagging gives
-     * operators a visible review queue parallel to the alert email.
+     * Record a NeedsReview, Suspicious or HighRisk finding without moving
+     * the file. Unverified heuristics can match legitimate dependencies;
+     * the dispatcher therefore uses this path for all reviewable findings.
      *
      * Idempotent: if a flagged row already exists for the same path,
      * the existing ID is returned and no new row is written — prevents

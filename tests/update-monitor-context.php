@@ -16,6 +16,8 @@ namespace {
     $GLOBALS['monitor_paths'] = [];
     $GLOBALS['monitor_option_reads'] = 0;
     $GLOBALS['monitor_checks'] = 0;
+    $GLOBALS['monitor_schedule_repairs'] = 0;
+    $GLOBALS['monitor_environment_logs'] = 0;
     $_SERVER['REQUEST_METHOD'] = 'GET';
     function is_admin(): bool { return $GLOBALS['monitor_context']['admin']; }
     function wp_doing_cron(): bool { return $GLOBALS['monitor_context']['cron']; }
@@ -89,9 +91,9 @@ namespace HMDG\Security\Services {
         public const HOOK_MALWARE_BATCH = 'malware-batch';
         public const HOOK_CLEANUP = 'cleanup';
         public function registerCustomIntervals(): void {}
-        public function registerScheduledEvents(): void {}
+        public function registerScheduledEvents(): void { $GLOBALS['monitor_schedule_repairs']++; }
         public function bindReportPlaceholders(): void {}
-        public function logEnvironmentOnBoot(): void {}
+        public function logEnvironmentOnBoot(): void { $GLOBALS['monitor_environment_logs']++; }
     }
 }
 namespace HMDG\Security\Modules {
@@ -109,6 +111,7 @@ namespace {
     require_once __DIR__ . '/../includes/Services/ReleaseMetadata.php';
     require_once __DIR__ . '/../includes/Services/ReleaseUpdater.php';
     require_once __DIR__ . '/../includes/Modules/UpdateMonitor.php';
+    require_once __DIR__ . '/../includes/Modules/UserEnumerationProtection.php';
     require_once __DIR__ . '/../includes/Plugin.php';
 
     function bootRealOrchestrator(): void
@@ -134,9 +137,14 @@ namespace {
     monitorCheck(!isset($GLOBALS['monitor_hooks']['update_plugins_github.com']), 'actual frontend boot has no release updater');
     monitorCheck($GLOBALS['monitor_option_reads'] === 0 && $GLOBALS['monitor_cache'] === [], 'frontend context adds no update option/cache work');
 
+    monitorCheck($GLOBALS['monitor_schedule_repairs'] === 0 && $GLOBALS['monitor_environment_logs'] === 0, 'visitor boot never repairs cron schedules or writes environment logs');
+    monitorCheck(isset($GLOBALS['monitor_hooks']['rest_pre_dispatch']), 'visitor boot registers the dedicated request policy');
+
     $GLOBALS['monitor_hooks'] = [];
     $GLOBALS['monitor_context']['cron'] = true;
     bootRealOrchestrator();
+    monitorCheck($GLOBALS['monitor_schedule_repairs'] === 1 && $GLOBALS['monitor_environment_logs'] === 1, 'cron retains scheduling repair and operational logging');
+    monitorCheck(isset($GLOBALS['monitor_hooks']['rest_pre_dispatch']), 'cron internal REST requests retain enumeration protection');
     $callbacks = monitorCallbacks();
     monitorCheck(count($callbacks) === 1, 'actual cron boot registers one update monitor before its early return');
     monitorCheck(isset($GLOBALS['monitor_hooks']['update_plugins_github.com']), 'cron also registers the signed release updater');
@@ -169,6 +177,8 @@ namespace {
     $GLOBALS['monitor_hooks'] = [];
     bootRealOrchestrator();
     $callbacks = monitorCallbacks();
+    monitorCheck($GLOBALS['monitor_schedule_repairs'] === 2, 'CLI retains schedule repair before its early return');
+    monitorCheck(isset($GLOBALS['monitor_hooks']['rest_pre_dispatch']), 'CLI internal REST requests retain enumeration protection');
     monitorCheck(count($callbacks) === 1, 'actual CLI boot registers exactly one monitor before its early return');
     $callbacks[0]($upgrader, ['action' => 'update', 'type' => 'plugin', 'plugin' => $own]);
     monitorCheck($GLOBALS['monitor_paths'] === [$prefix], 'CLI single-plugin updates use the same scoped rebaseline');

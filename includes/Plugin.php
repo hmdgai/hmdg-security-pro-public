@@ -33,6 +33,7 @@ use HMDG\Security\Modules\LoginProtection;
 use HMDG\Security\Modules\MalwareScanner;
 use HMDG\Security\Modules\UpdateMonitor;
 use HMDG\Security\Modules\UserMonitor;
+use HMDG\Security\Modules\UserEnumerationProtection;
 use HMDG\Security\Services\AlertService;
 use HMDG\Security\Services\BuilderDetectionService;
 use HMDG\Security\Services\CronService;
@@ -44,8 +45,9 @@ use HMDG\Security\Services\ReleaseUpdater;
  * Main orchestrator — wires services and modules based on request context.
  *
  * Boot strategy is context-aware. Each module is loaded only on requests
- * where its hooks can actually fire. Front-end visitor requests get just
- * Headers and a slim Hardening pass; login requests get LoginProtection;
+ * where its hooks can actually fire. All contexts register the lightweight
+ * user-enumeration policy for internal REST dispatch. Front-end visitor
+ * requests also get Headers and a slim Hardening pass; login requests get LoginProtection;
  * admin requests get UserMonitor; AJAX requests to builder endpoints get
  * ElementorSecurity / DiviSecurity; cron requests get the scheduled
  * scanners. Nothing else loads.
@@ -147,8 +149,7 @@ final class Plugin
      *   1. Custom cron intervals — must be registered before WP reads
      *      `wp_get_schedules()` for any subsequent `wp_schedule_event` call.
      *      One `add_filter` call, effectively free.
-     *   2. Scheduled-event registration sweep — idempotent, static-flagged.
-     *      Runs real work only on the first call per PHP worker lifetime.
+     *   2. Scheduled-event repair — admin/cron/CLI only, once per request.
      *   3. Cron callback binding — wires hook names to module methods, plus
      *      the report placeholders. GATED on request context: only binds
      *      in admin / cron / CLI, where a cron hook can actually fire.
@@ -163,6 +164,10 @@ final class Plugin
      */
     public function boot(): void
     {
+        // Internal REST dispatch (including embedded/batch/CLI requests)
+        // needs the same account-data policy as an ordinary HTTP request.
+        (new UserEnumerationProtection())->register();
+
         // Register before CLI/cron early returns. Anonymous visitors never
         // instantiate the updater, read its cache, or call the release API.
         if ($this->shouldBindCronCallbacks()) {
@@ -179,13 +184,12 @@ final class Plugin
             }
         }
 
-        // ── 1–2. Cron interval + event registration run in every context.
-        // `registerCustomIntervals` is a single `add_filter` call.
-        // `registerScheduledEvents` is static-guarded so it only does real
-        // work once per PHP worker's lifetime — on a warm worker, it's a
-        // single boolean check.
+        // Schedule definitions are pure hook registration. Schedule repair
+        // reads/writes options and belongs only to operational contexts.
         $this->cronService->registerCustomIntervals();
-        $this->cronService->registerScheduledEvents();
+        if ($this->shouldBindCronCallbacks()) {
+            $this->cronService->registerScheduledEvents();
+        }
 
         // ── 3. Cron callback binding — context-gated.
         //
@@ -219,8 +223,11 @@ final class Plugin
             return;
         }
 
-        // 5. Boot logging — throttled, only one file write per hour at most.
-        $this->cronService->logEnvironmentOnBoot();
+        // Environment detection/logging can touch the filesystem. Keep it
+        // off visitor requests even when the cache throttle has expired.
+        if ($this->shouldBindCronCallbacks()) {
+            $this->cronService->logEnvironmentOnBoot();
+        }
 
         // Cron context — only scheduled scanners (callbacks already bound).
         // Before returning, log HMDG Helpers compatibility status so every
@@ -271,11 +278,6 @@ final class Plugin
         // Hardening — broad protections needed across browser-facing surfaces
         // (skipped for AJAX/REST data calls where its hooks are no-ops)
         if (!$isAjax && !$isRest) {
-            $this->bootHardening();
-        } elseif ($isRest) {
-            // REST needs only the user-enumeration filter from Hardening,
-            // which Hardening installs as part of its full registration.
-            // Cost is acceptable; the alternative is splitting Hardening.
             $this->bootHardening();
         }
 

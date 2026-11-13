@@ -32,7 +32,6 @@ final class Hardening
         $this->disableXmlRpc();
         $this->removeVersionDisclosure();
         $this->removeHeadClutter();
-        $this->disableUserEnumeration();
         $this->disableApplicationPasswords();
         $this->forceSslAdmin();
         $this->removeXPoweredByHeader();
@@ -111,79 +110,6 @@ final class Hardening
     {
         $this->removeWlwManifestLink();
         $this->removeRsdLink();
-    }
-
-    // ── 5. Disable user enumeration ────────────────────────────────────
-
-    /**
-     * Author archives and the ?author=N trick allow attackers to harvest
-     * valid usernames for credential-stuffing. The REST /wp/v2/users
-     * endpoint also exposes user slugs to anonymous visitors.
-     *
-     * Builder exception: Elementor and Divi fetch user data during visual
-     * editing (e.g. author widgets, user-select dropdowns). When a builder
-     * edit session is active we allow REST user queries to avoid breaking
-     * the editing experience.
-     */
-    private function disableUserEnumeration(): void
-    {
-        // Block author archive enumeration and ?author=N probing
-        add_action('template_redirect', function (): void {
-            /*
-             * Builder edit-mode requests never hit template_redirect
-             * (they are AJAX or REST), but we guard anyway for safety.
-             */
-            if ($this->builderDetection->isElementorEditMode() || $this->builderDetection->isDiviBuilderActive()) {
-                return;
-            }
-
-            if (is_author()) {
-                wp_safe_redirect(home_url(), 301);
-                exit;
-            }
-
-            $authorParam = $_GET['author'] ?? null;
-            if ($authorParam !== null && is_numeric($authorParam)) {
-                wp_safe_redirect(home_url(), 301);
-                exit;
-            }
-        }, 10, 0);
-
-        // Block unauthenticated REST API user listing
-        add_filter('rest_authentication_errors', function (?\WP_Error $result): ?\WP_Error {
-            // If a previous filter already set an error, respect it
-            if ($result instanceof \WP_Error) {
-                return $result;
-            }
-
-            // Only restrict the users endpoint
-            $restRoute = $GLOBALS['wp']?->query_vars['rest_route'] ?? '';
-            if (!str_contains($restRoute, '/wp/v2/users')) {
-                return $result;
-            }
-
-            // Authenticated users may query — they need it in wp-admin
-            if (is_user_logged_in()) {
-                return $result;
-            }
-
-            /*
-             * Builder exception: when Elementor or Divi is in edit mode,
-             * builder iframes and front-end previews may fetch user data
-             * without a cookie-authenticated session (e.g. nonce-based
-             * REST calls from the builder iframe). Allow these through
-             * to prevent the visual editor from breaking.
-             */
-            if ($this->builderDetection->isElementorEditMode() || $this->builderDetection->isDiviBuilderActive()) {
-                return $result;
-            }
-
-            return new \WP_Error(
-                'rest_user_enumeration_blocked',
-                'User enumeration via the REST API is disabled.',
-                ['status' => 403],
-            );
-        }, 10, 1);
     }
 
     // ── 6. Disable application passwords ───────────────────────────────

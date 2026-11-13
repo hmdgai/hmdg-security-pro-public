@@ -243,7 +243,7 @@ final class AdminPage
         echo '<div class="hmdg-card">';
         echo '<div class="hmdg-card__header">';
         echo '<h2>' . esc_html__('Malware Quarantine', 'hmdg-security-pro') . '</h2>';
-        echo '<p class="hmdg-card__subtitle">' . esc_html__('Every HighRisk detection is automatically moved to the quarantine directory on disk. Delete a finding permanently to free the disk, or mark it as a false positive to restore the file and keep the row for audit.', 'hmdg-security-pro') . '</p>';
+        echo '<p class="hmdg-card__subtitle">' . esc_html__('Scan findings, including HighRisk detections, are flagged for review without moving files. Existing quarantined files retain their delete and false-positive restore controls.', 'hmdg-security-pro') . '</p>';
         echo '<div class="hmdg-subtabs">';
         $this->renderSubtab(
             status: FindingsRepository::STATUS_QUARANTINED,

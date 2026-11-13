@@ -26,7 +26,7 @@ namespace HMDG\Security\Detection;
  *                       current SecurityEvent policy.
  *   - HighRisk        : Score >= 70 with >= 2 categories AND (if LowRisk
  *                       path) the escalation quorum. Logged at CRITICAL;
- *                       eligible for existing auto-quarantine. No email
+ *                       flagged for operator review without file movement. No email
  *                       under the current SecurityEvent policy.
  *
  * @since 1.4.0
@@ -44,9 +44,8 @@ enum Severity: int
      * Whether this severity reaches the dispatcher's escalation path.
      *
      * Historical name: Suspicious and HighRisk reach AlertService, whose
-     * separate SecurityEvent policy denies every current event. This gate
-     * also precedes HighRisk auto-quarantine in AlertDispatcher; changing it
-     * to silence email would unintentionally disable that existing action.
+     * separate SecurityEvent policy denies every current event. Flagging
+     * happens independently before this gate; no tier automatically moves files.
      */
     public function emitsEmail(): bool
     {
