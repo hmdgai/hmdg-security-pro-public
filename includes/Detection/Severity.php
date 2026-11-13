@@ -22,11 +22,12 @@ namespace HMDG\Security\Detection;
  *                       a single-category hit on a low-weight signal.
  *   - Suspicious      : Score 40-69 OR (score >= 70 on a low-risk path
  *                       without the HighRisk quorum). Logged at WARNING;
- *                       email sent. Operator should review within the
- *                       weekly cycle.
+ *                       flagged for operator review. No email under the
+ *                       current SecurityEvent policy.
  *   - HighRisk        : Score >= 70 with >= 2 categories AND (if LowRisk
  *                       path) the escalation quorum. Logged at CRITICAL;
- *                       email sent. Bypasses the global hourly alert cap.
+ *                       eligible for existing auto-quarantine. No email
+ *                       under the current SecurityEvent policy.
  *
  * @since 1.4.0
  */
@@ -40,11 +41,12 @@ enum Severity: int
     case HighRisk       = 50;
 
     /**
-     * Whether this severity should emit an operator email.
+     * Whether this severity reaches the dispatcher's escalation path.
      *
-     * Only Suspicious and HighRisk produce alerts. Everything below is
-     * log-only — the whole point of the scoring engine is to eliminate
-     * the single-signal false-positive email flood.
+     * Historical name: Suspicious and HighRisk reach AlertService, whose
+     * separate SecurityEvent policy denies every current event. This gate
+     * also precedes HighRisk auto-quarantine in AlertDispatcher; changing it
+     * to silence email would unintentionally disable that existing action.
      */
     public function emitsEmail(): bool
     {
@@ -54,8 +56,8 @@ enum Severity: int
     /**
      * Whether this severity is the critical-escalation tier.
      *
-     * HighRisk findings bypass the AlertService global hourly cap; every
-     * other tier obeys it.
+     * If the SecurityEvent policy permits delivery, HighRisk bypasses the
+     * AlertService global hourly cap. This never overrides event policy.
      */
     public function isCritical(): bool
     {

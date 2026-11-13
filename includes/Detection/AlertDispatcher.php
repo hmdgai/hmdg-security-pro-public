@@ -15,16 +15,14 @@ use HMDG\Security\Services\LogService;
  * Responsibilities:
  *   - Log every finding regardless of Severity (at the level chosen by
  *     Severity::logLevel()).
- *   - Gate email dispatch by Severity::emitsEmail() — only Suspicious
- *     and HighRisk produce an email.
+ *   - Route Suspicious and HighRisk through AlertService. Its independent
+ *     SecurityEvent policy denies email for all current heuristic findings.
  *   - Map Severity onto the correct SecurityEvent case so alert
  *     subjects, default recommendations, and log severity remain
  *     consistent across the plugin.
  *   - Supply the `unique_key` used by AlertService for per-file
  *     dedup (`scan:<path>`).
- *   - Preserve HighRisk escalation: the AlertService global hourly
- *     cap is bypassed for HighRisk because those findings are
- *     CRITICAL under the existing SecurityEvent::severity() mapping.
+ *   - Preserve HighRisk auto-quarantine independently of email eligibility.
  *
  * @since 1.4.0
  */
@@ -119,7 +117,8 @@ final class AlertDispatcher
             );
         }
 
-        // Non-email tiers stop here.
+        // Lower tiers stop here. Keep HighRisk flowing through to the
+        // quarantine action even when AlertService declines email.
         if (!$severity->emitsEmail()) {
             return;
         }
@@ -183,9 +182,9 @@ final class AlertDispatcher
 
         // v1.5.0 — auto-quarantine HighRisk findings. Only HighRisk,
         // never Suspicious. If the QuarantineService is not wired in
-        // (admin boot has not run) we just skip — the alert still
-        // reaches the operator via email. The file stays in place and
-        // can be actioned on the next admin visit once the system
+        // (admin boot has not run) we just skip; the finding remains
+        // logged. The file stays in place and can be actioned on the
+        // next admin visit once the system
         // re-detects it.
         if ($severity === Severity::HighRisk && $this->quarantineService !== null) {
             $this->quarantineService->quarantine(

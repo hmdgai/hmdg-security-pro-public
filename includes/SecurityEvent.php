@@ -74,34 +74,34 @@ enum SecurityEvent: string
     /**
      * Whether this event type should produce an operator email.
      *
-     * Policy as of v1.7.0: only malware-detection-family events email.
-     * Login events, user-lifecycle events, spam, and builder anomalies
-     * are still logged and still create admin-visible records where
-     * applicable (e.g. Lockout History, Flagged for review queue) —
-     * only the outbound email path is gated here. See CHANGELOG 1.7.0
-     * for rationale.
+     * Only independently verified malware may email. No current event
+     * has a producer that establishes that proof: HighRiskTampering is
+     * heuristic, and the legacy MalwareDetected path reports PHP in
+     * uploads without confirming malware. All current events therefore
+     * remain silent, regardless of severity or caller-supplied context.
      *
-     * Exhaustive match: adding a new SecurityEvent case without
-     * categorising it here is a deliberate compile-time error.
+     * This gates email only. Callers retain detection, logging, dashboard
+     * records and quarantine behaviour. A future verified-malware producer
+     * needs a separately reviewed event and evidence contract before it
+     * can be enabled here; a confirmation flag is not sufficient.
+     *
+     * Exhaustive match: a new case must be reviewed here. An omitted case
+     * throws UnhandledMatchError when evaluated instead of enabling mail.
      *
      * @since 1.7.0
      */
     public function emitsEmail(): bool
     {
         return match ($this) {
-            // Malware-detection family — always candidates for email.
-            // Whether the email actually fires still depends on
-            // Severity::emitsEmail() (tier gate) and AlertService's
-            // dedup + rate-limit gates.
+            // Heuristics, baseline drift and uploads PHP are not proof.
             self::HighRiskTampering,
             self::SuspiciousChange,
             self::NeedsReviewFinding,
             self::MalwareDetected,
             self::SuspiciousUpload,
-            self::FileModified       => true,
+            self::FileModified,
 
-            // Everything else: silent. Still logged; still recorded
-            // in admin tables where applicable.
+            // Other security events remain silent as before.
             self::LoginFailed,
             self::LoginLockout,
             self::SpamDetected,

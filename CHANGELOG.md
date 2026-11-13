@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.11.4] - 2026-11-13
+
+### Changed
+
+- Disable email for unverified detection events, including high-risk tampering, suspicious changes, modified files, suspicious uploads and the legacy malware-labelled uploads finding. Severity and caller-supplied context cannot bypass the central email policy.
+- Preserve scanning, local logs, dashboard findings and existing file protections. This patch changes detection email delivery only.
+
+### Operator note
+
+- The current scanner produces heuristic findings, not independently confirmed malware verdicts. All current detection events therefore remain silent by email. A separate evidence-verification mechanism is required before confirmed-malware emails can be enabled; a high score, filename, PHP extension or changed checksum is insufficient.
+- Activation cleanup confirmations and WordPress update-failure notifications are separate operational messages and retain their existing behaviour.
+
 ## [1.11.3] - 2026-11-09
 
 ### Fixed

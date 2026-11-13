@@ -12,9 +12,11 @@ use HMDG\Security\SecurityEvent;
 /**
  * Centralised email alert dispatcher for all security events.
  *
- * Every module routes alerts through this service rather than sending
- * emails directly. It enforces rate limiting (one alert per event+source
- * combination per hour), suppresses alerts during builder import
+ * Detection modules route alerts through this service. Event policy is
+ * checked first; no current event has verified-malware evidence, so all
+ * existing detections are email-silent. The retained delivery path enforces
+ * rate limiting (one alert per event+source combination per hour),
+ * suppresses alerts during builder import
  * operations, and produces clean HTML emails with inline CSS.
  *
  * @since 1.0.0
@@ -67,8 +69,11 @@ final class AlertService
     /**
      * Dispatch an email alert for a security event.
      *
-     * Alerts are suppressed when a builder import is active and when the
-     * same event+source combination was already alerted within the
+     * SecurityEvent policy is authoritative and is checked before severity,
+     * context, builder state or cache access. No current event is eligible;
+     * a severity override or a caller's confirmation claim cannot enable it.
+     * Eligible alerts would also be suppressed during a builder import or
+     * when the same event+source combination was already alerted within the
      * configured rate-limit window. On success the alert is logged and a
      * rate-limit key is planted in the object cache.
      *
@@ -85,11 +90,10 @@ final class AlertService
      */
     public function send(SecurityEvent $event, array $context = [], ?Severity $severity = null): void
     {
-        // v1.7.0 policy gate — silence every event type that is not a
-        // malware-detection-family event. See SecurityEvent::emitsEmail()
-        // for the allowlist (6 events email; 7 are silent). Non-emailing
-        // events are still logged by their callers and still create
-        // admin-visible records (lockout history, flagged findings, etc.).
+        // Verified-malware-only policy: every existing event is denied.
+        // Heuristic severity and the legacy MalwareDetected label do not
+        // prove malware. Keep this before all context/severity overrides.
+        // Callers retain logging, admin records and quarantine behaviour.
         // Returning silently here is intentional: the event is already
         // logged at the call site, so re-logging the suppression would
         // double the log volume on every login lockout, user creation,
